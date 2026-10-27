@@ -14,9 +14,9 @@ SERVER_NAME="django.local"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # ---------- Helpers ----------
-log()  { echo -e "\n\033[1;34m==> $*\033[0m"; }   # blue title
-ok()   { echo -e "   \033[1;32m $*\033[0m"; }    # green
-skip() { echo -e "   \033[1;33m $*\033[0m"; }    # yellow
+log()  { echo -e "\n\033[1;34m==> $*\033[0m"; }
+ok()   { echo -e "   \033[1;32m[OK]   $*\033[0m"; }
+skip() { echo -e "   \033[1;33m[SKIP] $*\033[0m"; }
 
 # ---------- 0. Safety checks ----------
 check_root() {
@@ -31,6 +31,8 @@ check_root() {
 # ---------- 1. Packages ----------
 install_packages() {
   log "1. Install packages"
+  export DEBIAN_FRONTEND=noninteractive   # apt: never ask questions
+  export NEEDRESTART_MODE=a               # needrestart: restart services automatically
   apt-get update -qq
   apt-get install -y -qq python3-venv python3-pip nginx ufw fail2ban git
   ok "packages installed"
