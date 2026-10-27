@@ -107,6 +107,25 @@ harden_ssh() {
   fi
 }
 
+# ---------- 5. Firewall ----------
+setup_firewall() {
+  log "5. Firewall (ufw)"
+  ufw default deny incoming  >/dev/null
+  ufw default allow outgoing >/dev/null
+  # Allow SSH FIRST, so enabling the firewall can't lock us out
+  ufw allow OpenSSH >/dev/null
+  ufw allow 80/tcp  >/dev/null
+  ufw allow 443/tcp >/dev/null
+  ok "rules: deny incoming, allow 22 (OpenSSH), 80, 443"
+
+  if ufw status | grep -q "Status: active"; then
+    skip "ufw already active"
+  else
+    ufw --force enable >/dev/null
+    ok "ufw enabled"
+  fi
+}
+
 # ---------- Main ----------
 main() {
   check_root
@@ -114,7 +133,8 @@ main() {
   create_admin_user
   setup_admin_key
   harden_ssh
-  log "Done (part 2)"
+  setup_firewall
+  log "Done (part 3)"
 }
 
 main "$@"
