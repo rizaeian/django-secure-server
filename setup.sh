@@ -126,6 +126,66 @@ setup_firewall() {
   fi
 }
 
+# Run a command as the app user, from "/" (the app user can't enter our home)
+as_app() { (cd / && sudo -u "$APP_USER" "$@"); }
+
+# ---------- 6. App user ----------
+create_app_user() {
+  log "6. App user: $APP_USER"
+  if id "$APP_USER" &>/dev/null; then
+    skip "user $APP_USER already exists"
+  else
+    adduser --system --group --home "$APP_DIR" --shell /usr/sbin/nologin "$APP_USER"
+    ok "system user $APP_USER created (no login, no sudo)"
+  fi
+  chmod 750 "$APP_DIR"
+  ok "$APP_DIR is private (750)"
+}
+
+# ---------- 7. Django app ----------
+setup_django_app() {
+  log "7. Django app"
+  if [[ -x "$APP_DIR/venv/bin/python" ]]; then
+    skip "venv already exists"
+  else
+    as_app python3 -m venv "$APP_DIR/venv"
+    ok "venv created"
+  fi
+
+  as_app "$APP_DIR/venv/bin/pip" install -q django gunicorn
+  ok "django and gunicorn installed in the venv"
+
+  local settings="$APP_DIR/app/mysite/settings.py"
+  if [[ -f "$APP_DIR/app/manage.py" ]]; then
+    skip "Django project already exists"
+  else
+    as_app mkdir -p "$APP_DIR/app"
+    as_app "$APP_DIR/venv/bin/django-admin" startproject mysite "$APP_DIR/app"
+    as_app sed -i "s/^ALLOWED_HOSTS = \[\]/ALLOWED_HOSTS = ['localhost', '127.0.0.1', '$SERVER_NAME']/" "$settings"
+    as_app sed -i 's/^from pathlib import Path/from pathlib import Path\nimport os/' "$settings"
+    as_app sed -i "s/^SECRET_KEY = .*/SECRET_KEY = os.environ['DJANGO_SECRET_KEY']/" "$settings"
+    as_app sed -i "s/^DEBUG = True/DEBUG = os.environ.get('DJANGO_DEBUG', 'False') == 'True'/" "$settings"
+    ok "project created; secrets and DEBUG read from the environment"
+  fi
+}
+
+# ---------- 8. Secrets (.env) ----------
+create_env_file() {
+  log "8. Secrets: $APP_DIR/.env"
+  local env_file="$APP_DIR/.env"
+  if [[ -f "$env_file" ]]; then
+    skip ".env already exists (never overwrite secrets)"
+  else
+    local key
+    key="$(python3 -c 'import secrets; print(secrets.token_urlsafe(50))')"
+    ( umask 077; printf "DJANGO_SECRET_KEY=%s\nDJANGO_DEBUG=False\n" "$key" > "$env_file" )
+    ok ".env created with a new random secret"
+  fi
+  chown "$APP_USER:$APP_USER" "$env_file"
+  chmod 600 "$env_file"
+  ok "owner $APP_USER, mode 600"
+}
+
 # ---------- Main ----------
 main() {
   check_root
@@ -134,7 +194,10 @@ main() {
   setup_admin_key
   harden_ssh
   setup_firewall
-  log "Done (part 3)"
+  create_app_user
+  setup_django_app
+  create_env_file
+  log "Done (part 4)"
 }
 
 main "$@"
