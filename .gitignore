@@ -1,0 +1,14 @@
+# Secrets: never commit these
+.env
+*.key
+*.pem
+id_*
+
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Backups and editor files
+*.bak
+*.swp
