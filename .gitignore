@@ -12,3 +12,4 @@ __pycache__/
 # Backups and editor files
 *.bak
 *.swp
+admin_key.pub

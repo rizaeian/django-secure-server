@@ -12,6 +12,7 @@ APP_DIR="/srv/django"
 APP_PORT="8001"
 SERVER_NAME="django.local"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ADMIN_PUBKEY_FILE="$SCRIPT_DIR/admin_key.pub"
 
 # ---------- Helpers ----------
 log()  { echo -e "\n\033[1;34m==> $*\033[0m"; }
@@ -51,12 +52,69 @@ create_admin_user() {
   ok "$ADMIN_USER is in the sudo group"
 }
 
+# ---------- 3. Admin SSH key ----------
+setup_admin_key() {
+  log "3. SSH key for $ADMIN_USER"
+  if [[ ! -f "$ADMIN_PUBKEY_FILE" ]]; then
+    echo "Missing $ADMIN_PUBKEY_FILE - put the admin's PUBLIC key there first." >&2
+    exit 1
+  fi
+  local ssh_dir="/home/$ADMIN_USER/.ssh"
+  local auth="$ssh_dir/authorized_keys"
+  local key
+  key="$(cat "$ADMIN_PUBKEY_FILE")"
+
+  install -d -m 700 -o "$ADMIN_USER" -g "$ADMIN_USER" "$ssh_dir"
+  touch "$auth"
+  if grep -qxF "$key" "$auth"; then
+    skip "key already in authorized_keys"
+  else
+    echo "$key" >> "$auth"
+    ok "key added"
+  fi
+  chown "$ADMIN_USER:$ADMIN_USER" "$auth"
+  chmod 600 "$auth"
+  ok "owner and permissions set (700 / 600)"
+}
+
+# ---------- 4. SSH hardening ----------
+harden_ssh() {
+  log "4. SSH hardening"
+  local src="$SCRIPT_DIR/config/10-hardening.conf"
+  local dst="/etc/ssh/sshd_config.d/10-hardening.conf"
+
+  # Safety: never disable passwords if the admin has no key
+  if [[ ! -s "/home/$ADMIN_USER/.ssh/authorized_keys" ]]; then
+    echo "No SSH key for $ADMIN_USER - refusing to harden SSH (lockout risk)." >&2
+    exit 1
+  fi
+
+  if cmp -s "$src" "$dst"; then
+    skip "hardening file already up to date"
+    return
+  fi
+
+  if [[ -f "$dst" ]]; then cp "$dst" "$dst.bak"; fi
+  install -m 644 "$src" "$dst"
+
+  if sshd -t; then
+    systemctl reload ssh
+    ok "SSH hardened and reloaded"
+  else
+    echo "sshd config test failed - restoring the old file" >&2
+    if [[ -f "$dst.bak" ]]; then mv "$dst.bak" "$dst"; else rm -f "$dst"; fi
+    exit 1
+  fi
+}
+
 # ---------- Main ----------
 main() {
   check_root
   install_packages
   create_admin_user
-  log "Done (part 1)"
+  setup_admin_key
+  harden_ssh
+  log "Done (part 2)"
 }
 
 main "$@"
