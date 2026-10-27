@@ -20,7 +20,19 @@ ok()   { echo -e "   \033[1;32m[OK]   $*\033[0m"; }
 skip() { echo -e "   \033[1;33m[SKIP] $*\033[0m"; }
 
 # ---------- 0. Safety checks ----------
-
+check_root() {
+  log "0. Safety checks"
+  if [[ $EUID -ne 0 ]]; then
+    echo "Please run with sudo: sudo ./setup.sh" >&2
+    exit 1
+  fi
+  ok "running as root"
+  if ! grep -qi "ubuntu" /etc/os-release; then
+    echo "This script supports Ubuntu only (found: $(. /etc/os-release && echo "$PRETTY_NAME"))." >&2
+    exit 1
+  fi
+  ok "Ubuntu detected"
+}
 
 # ---------- 1. Packages ----------
 install_packages() {
