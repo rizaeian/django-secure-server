@@ -186,6 +186,78 @@ create_env_file() {
   ok "owner $APP_USER, mode 600"
 }
 
+# Copy a config file only if it is different. Returns 0 if it changed.
+install_if_changed() {
+  local src="$1" dst="$2"
+  if cmp -s "$src" "$dst"; then return 1; fi
+  install -m 644 "$src" "$dst"
+  return 0
+}
+
+# ---------- 9. systemd service ----------
+setup_service() {
+  log "9. systemd service: django"
+  if install_if_changed "$SCRIPT_DIR/config/django.service" /etc/systemd/system/django.service; then
+    systemctl daemon-reload
+    systemctl restart django
+    ok "service file installed and restarted"
+  else
+    skip "service file already up to date"
+  fi
+  systemctl enable --now django >/dev/null 2>&1
+  if systemctl is-active --quiet django; then
+    ok "django is running"
+  else
+    echo "django service failed - see: journalctl -u django -n 30" >&2
+    exit 1
+  fi
+}
+
+# ---------- 10. nginx ----------
+setup_nginx() {
+  log "10. nginx site: $SERVER_NAME"
+  if install_if_changed "$SCRIPT_DIR/config/nginx-django.conf" /etc/nginx/sites-available/django; then
+    ok "site file installed"
+  else
+    skip "site file already up to date"
+  fi
+  ln -sf /etc/nginx/sites-available/django /etc/nginx/sites-enabled/django
+  if nginx -t -q; then
+    systemctl reload nginx
+    ok "nginx config OK and reloaded"
+  else
+    echo "nginx config test failed - not reloading" >&2
+    exit 1
+  fi
+}
+
+# ---------- 11. fail2ban ----------
+setup_fail2ban() {
+  log "11. fail2ban"
+  if install_if_changed "$SCRIPT_DIR/config/jail.local" /etc/fail2ban/jail.local; then
+    systemctl restart fail2ban
+    ok "jail.local installed, fail2ban restarted"
+  else
+    skip "jail.local already up to date"
+  fi
+  systemctl enable --now fail2ban >/dev/null 2>&1
+  ok "fail2ban is running"
+}
+
+# ---------- 12. Final check ----------
+final_check() {
+  log "12. Final check"
+  if ss -tln | grep -q "127.0.0.1:$APP_PORT"; then
+    ok "app listens only on 127.0.0.1:$APP_PORT"
+  else
+    echo "app is not listening on 127.0.0.1:$APP_PORT" >&2
+    exit 1
+  fi
+  local code
+  code="$(curl -s -o /dev/null -w '%{http_code}' -H "Host: $SERVER_NAME" http://localhost)"
+  ok "http://$SERVER_NAME answered with HTTP $code (404 is expected: DEBUG is off, no pages yet)"
+}
+
 # ---------- Main ----------
 main() {
   check_root
@@ -197,7 +269,11 @@ main() {
   create_app_user
   setup_django_app
   create_env_file
-  log "Done (part 4)"
+  setup_service
+  setup_nginx
+  setup_fail2ban
+  final_check
+  log "All done"
 }
 
 main "$@"
