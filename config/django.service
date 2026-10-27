@@ -1,0 +1,14 @@
+[Unit]
+Description=Django app (gunicorn)
+After=network.target
+
+[Service]
+User=django
+Group=django
+EnvironmentFile=/srv/django/.env
+WorkingDirectory=/srv/django/app
+ExecStart=/srv/django/venv/bin/gunicorn --workers 2 --bind 127.0.0.1:8001 mysite.wsgi
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
